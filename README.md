@@ -26,4 +26,59 @@ NextNum 是一个用于生成唯一标识符的 Go 语言库。它提供了多�
 1. 添加最后时间戳检查
 2. 使用系统时钟单调性检查
 
+
+## snowflake 里面虽然加了 lasttime 标记，但每次重启都还会设置为 0 的？
+
+您提出了一个很好的观察。确实，在当前的实现中，每次重启时 lastTime 都会被设置为 0，这可能会导致在重启后立即生成 ID 时出现潜在的问题。让我们来改进这个实现，以解决这个问题。
+我们可以通过以下方式改进 snowflake/generator.go 文件：
+1. 在初始化时将 lastTime 设置为当前时间。
+2. 添加一个持久化机制来存储最后生成 ID 的时间。
+这里是改进后的 snowflake/generator.go 文件：
+这个改进版本有以下特点：
+1. 添加了 filename 字段来指定存储 lastTime 的文件。
+2. 在创建新的 Generator 实例时，会尝试从文件加载上次的时间戳。如果文件不存在，则使用当前时间作为初始值。
+3. 每次生成新的 ID 后，都会将 lastTime 保存到文件中。
+4. 如果检测到时钟回拨，会等待直到时间赶上之前记录的最后时间。
+这些改进可以解决以下问题：
+重启问题：即使在重启后，也能读取之前保存的最后时间戳，避免生成重复的 ID。
+时钟回拨：如果检测到系统时钟回拨，生成器会等待直到时钟赶上之前记录的最后时间。
+使用这个改进版本时，需要在创建 Generator 实例时指定一个文件名来存储 lastTime：
+```go
+generator, err := snowflake.NewGenerator(1, "snowflake_lasttime.txt")
+if err != nil {
+    log.Fatalf("创建生成器失败: %v", err)
+}
+```
+这个实现现在更加健壮，可以处理重启和轻微的时钟回拨问题。但是，请注意，频繁的文件 I/O 操作可能会影响性能。在高并发场景下，您可能需要考虑使用内存映射文件或其他更高效的持久化方法。
+
+
+
+##不要每次都记录，当使用方的程序退出时或者 panic 或者重启时，把这个值记录一下就可以了
+
+您提出了一个很好的优化建议。确实，每次生成 ID 都记录 lastTime 会导致频繁的 I/O 操作，这可能会影响性能。我们可以修改实现，只在程序退出、panic 或重启时记录 lastTime。
+让我们修改 snowflake/generator.go 文件来实现这个优化：
+这个优化版本有以下改进：
+移除了在每次生成 ID 后保存 lastTime 的操作。
+添加了 setupCleanup 方法，它设置了一个 goroutine 来监听中断信号（如 Ctrl+C）。当接收到信号时，它会保存 lastTime 并退出程序。
+3. 在 NewGenerator 中调用 setupCleanup，确保清理函数被设置。
+这个实现现在只会在程序正常退出时保存 lastTime。对于 panic 情况，您可能需要在 main 函数中使用 defer 来确保 lastTime 被保存：
+```go
+func main() {
+    generator, err := snowflake.NewGenerator(1, "snowflake_lasttime.txt")
+    if err != nil {
+        log.Fatalf("创建生成器失败: %v", err)
+    }
+
+    defer func() {
+        if r := recover(); r != nil {
+            generator.SaveLastTime() // 假设我们添加了这个方法
+            panic(r) // 重新抛出 panic
+        }
+    }()
+
+    // 使用 generator...
+}
+```
+这个优化版本大大减少了 I/O 操作，同时仍然保持了在程序退出或 panic 时保存状态的能力。这应该能显著提高性能，特别是在高并发场景下。
+请注意，这个实现仍然不能完全防止在极端情况下（如突然断电）丢失最后的状态。如果需要更高的可靠性，您可能需要考虑定期（比如每分钟）保存状态，或使用更复杂的持久化机制。
 ### 使用方法
