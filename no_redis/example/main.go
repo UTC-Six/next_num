@@ -8,9 +8,7 @@ import (
 )
 
 func main() {
-	// 使用当前时间戳作为初始值
-	initialValue := time.Now().UnixNano()
-	generator := no_redis.NewGenerator(initialValue)
+	generator := no_redis.NewGenerator()
 
 	// 生成单个数字
 	num := generator.Next()
@@ -23,7 +21,7 @@ func main() {
 
 	// 演示在不同时间生成的数字
 	time.Sleep(time.Second)
-	anotherGenerator := no_redis.NewGenerator(time.Now().UnixNano())
+	anotherGenerator := no_redis.NewGenerator()
 	anotherNum := anotherGenerator.Next()
 	fmt.Printf("1秒后生成的数字: %d\n", anotherNum)
 }
